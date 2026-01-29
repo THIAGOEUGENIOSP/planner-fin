@@ -1,0 +1,297 @@
+<!-- index.html (COMPLETO) -->
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Planner Fin</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+
+<body>
+  <!-- Como rodar:
+    - Recomendado: Live Server no VS Code
+  -->
+
+  <div class="app">
+    <aside class="sidebar" aria-label="Menu">
+      <div class="brand">
+        <div class="brand__logo" aria-hidden="true">₿</div>
+        <div class="brand__text">
+          <div class="brand__name">Planner Fin</div>
+          <div class="brand__tag">Controle financeiro</div>
+        </div>
+      </div>
+
+      <nav class="nav">
+        <a class="nav__link" href="#/dashboard" data-route="dashboard">Dashboard</a>
+        <a class="nav__link" href="#/transactions" data-route="transactions">Lançamentos</a>
+        <a class="nav__link" href="#/categories" data-route="categories">Categorias</a>
+        <a class="nav__link" href="#/budgets" data-route="budgets">Orçamentos</a>
+        <a class="nav__link" href="#/goals" data-route="goals">Metas</a>
+        <a class="nav__link" href="#/reports" data-route="reports">Relatórios</a>
+        <a class="nav__link" href="#/settings" data-route="settings">Configurações</a>
+        <a class="nav__link" href="#/consultor" data-route="consultor">Consultor</a>
+
+      </nav>
+
+      <div class="sidebar__footer">
+        <div class="muted small">Dados salvos no navegador / Supabase</div>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="header">
+        <div class="header__left">
+          <button class="icon-btn" id="btnMenu" aria-label="Abrir menu (mobile)">
+            ☰
+          </button>
+          <div>
+            <div class="page-title" id="pageTitle">Dashboard</div>
+            <div class="muted small" id="pageSubtitle">Visão geral</div>
+          </div>
+        </div>
+
+        <div class="header__right">
+        <span class="badge" id="userBadge" style="display:none"></span>
+
+          <label class="month-picker" aria-label="Selecionar mês">
+            <span class="muted small">Mês</span>
+            <input id="monthInput" type="month" />
+          </label>
+
+          <button class="btn primary" id="btnQuickAdd" type="button">+ Novo</button>
+          <!-- botão Sair é criado via JS no app.js -->
+        </div>
+      </header>
+
+      <main class="content" id="appMain" tabindex="-1"></main>
+
+      <nav class="bottom-nav" aria-label="Navegação rápida">
+        <a href="#/dashboard" data-route="dashboard" aria-label="Dashboard">🏠</a>
+        <a href="#/transactions" data-route="transactions" aria-label="Lançamentos">🧾</a>
+        <a href="#/categories" data-route="categories" aria-label="Categorias">🏷️</a>
+        <a href="#/budgets" data-route="budgets" aria-label="Orçamentos">💰</a>
+        <a href="#/reports" data-route="reports" aria-label="Relatórios">📊</a>
+        <a href="#/settings" data-route="settings" aria-label="Configurações">⚙️</a>
+        <a href="#/consultor" data-route="consultor" aria-label="Consultor">🤖</a>
+
+      </nav>
+    </div>
+  </div>
+
+  <div class="toast-stack" id="toastStack" aria-live="polite" aria-relevant="additions"></div>
+
+  <!-- Modal: Adicionar lançamento rápido -->
+  <dialog class="modal" id="quickAddModal" aria-label="Adicionar lançamento rápido">
+    <form method="dialog" class="modal__card" id="quickAddForm">
+        <input type="hidden" name="id" />
+      <div class="modal__header">
+        <div>
+          <div class="modal__title">Novo lançamento</div>
+          <div class="muted small">Cadastro rápido</div>
+        </div>
+        <!-- TROCA: botão X não submete -->
+        <button class="icon-btn" type="button" data-close-modal="quickAddModal" aria-label="Fechar">✕</button>
+      </div>
+
+      <div class="grid">
+        <label class="field">
+          <span>Tipo</span>
+          <select name="type" required>
+            <option value="expense">Despesa</option>
+            <option value="income">Receita</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>Data</span>
+          <input name="date" type="date" required />
+        </label>
+
+        <label class="field span-2">
+          <span>Descrição</span>
+          <input name="description" type="text" placeholder="Ex: Mercado" required />
+        </label>
+
+        <label class="field">
+          <span>Valor</span>
+          <input name="amount" type="text" inputmode="decimal" placeholder="Ex: 123,45" required />
+        </label>
+
+        <label class="field">
+          <span>Categoria</span>
+          <select name="categoryId" required id="quickAddCategory"></select>
+        </label>
+
+        <label class="field span-2">
+          <span>Método</span>
+          <select name="paymentMethod">
+            <option value="pix">Pix</option>
+            <option value="credito">Crédito</option>
+            <option value="debito">Débito</option>
+            <option value="dinheiro">Dinheiro</option>
+            <option value="boleto">Boleto</option>
+            <option value="transferencia">Transferência</option>
+            <option value="outro">Outro</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="modal__actions">
+        <!-- TROCA: cancelar não submete e fecha sem validação -->
+        <button class="btn" type="button" data-close-modal="quickAddModal">Cancelar</button>
+        <button class="btn primary" type="submit">Salvar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Modal: Categoria -->
+  <dialog class="modal" id="categoryModal" aria-label="Categoria">
+    <form method="dialog" class="modal__card" id="categoryForm">
+      <input type="hidden" name="id" />
+
+      <div class="modal__header">
+        <div>
+          <div class="modal__title" id="categoryModalTitle">Nova categoria</div>
+          <div class="muted small">Crie ou edite uma categoria</div>
+        </div>
+        <!-- TROCA -->
+        <button class="icon-btn" type="button" data-close-modal="categoryModal" aria-label="Fechar">✕</button>
+      </div>
+
+      <div class="grid">
+        <label class="field span-2">
+          <span>Nome</span>
+          <input name="name" type="text" placeholder="Ex: Academia" required />
+        </label>
+
+        <label class="field">
+          <span>Tipo</span>
+          <select name="kind" required>
+            <option value="expense">Despesa</option>
+            <option value="income">Receita</option>
+            <option value="both">Ambos</option>
+          </select>
+        </label>
+
+        <label class="field">
+  <span>Ícone (emoji)</span>
+  <input name="icon" id="catIconInput" type="text" placeholder="Ex: 🍔" required />
+
+  <div class="emoji-picker" id="catEmojiPicker" aria-label="Selecionar emoji">
+    <button type="button" class="emoji-btn" data-emoji="💼">💼</button>
+    <button type="button" class="emoji-btn" data-emoji="🍔">🍔</button>
+    <button type="button" class="emoji-btn" data-emoji="🏠">🏠</button>
+    <button type="button" class="emoji-btn" data-emoji="🚗">🚗</button>
+    <button type="button" class="emoji-btn" data-emoji="🧾">🧾</button>
+    <button type="button" class="emoji-btn" data-emoji="🎮">🎮</button>
+    <button type="button" class="emoji-btn" data-emoji="🩺">🩺</button>
+    <button type="button" class="emoji-btn" data-emoji="📚">📚</button>
+    <button type="button" class="emoji-btn" data-emoji="💡">💡</button>
+    <button type="button" class="emoji-btn" data-emoji="🛒">🛒</button>
+    <button type="button" class="emoji-btn" data-emoji="💳">💳</button>
+    <button type="button" class="emoji-btn" data-emoji="🎁">🎁</button>
+    <button type="button" class="emoji-btn" data-emoji="🏋️">🏋️</button>
+    <button type="button" class="emoji-btn" data-emoji="✈️">✈️</button>
+    <button type="button" class="emoji-btn" data-emoji="📦">📦</button>
+    <button type="button" class="emoji-btn" data-emoji="🏋️">🏋️</button>
+    <button type="button" class="emoji-btn" data-emoji="🏷️">🏷️</button>
+    <button type="button" class="emoji-btn" data-emoji="📊">📊</button>
+  </div>
+
+   <div class="muted small">Dica: clique em um emoji acima para preencher.</div>
+</label>
+
+
+        <label class="field span-2">
+          <span>Cor</span>
+          <input name="color" type="color" value="#6d5efc" />
+        </label>
+      </div>
+
+      <div class="modal__actions">
+        <!-- TROCA -->
+        <button class="btn" type="button" data-close-modal="categoryModal">Cancelar</button>
+        <button class="btn primary" type="submit">Salvar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Modal: Meta -->
+  <dialog class="modal" id="goalModal" aria-label="Meta">
+    <form class="modal__card" id="goalForm" novalidate>
+      <input type="hidden" name="id" />
+
+      <div class="modal__header">
+        <div>
+          <div class="modal__title" id="goalModalTitle">Nova meta</div>
+          <div class="muted small">Defina um objetivo</div>
+        </div>
+        <!-- TROCA -->
+        <button class="icon-btn" type="button" data-close-modal="goalModal" aria-label="Fechar">✕</button>
+      </div>
+
+      <div class="grid">
+        <label class="field span-2">
+          <span>Nome</span>
+          <input name="name" type="text" placeholder="Ex: Reserva de emergência" required />
+        </label>
+
+        <label class="field">
+          <span>Valor alvo</span>
+          <input name="targetAmount" type="text" inputmode="decimal" placeholder="Ex: 5000,00" required />
+        </label>
+
+        <label class="field">
+          <span>Prazo (opcional)</span>
+          <input name="deadline" type="date" />
+        </label>
+
+        <label class="field span-2">
+          <span>Notas (opcional)</span>
+          <textarea name="notes" rows="3"
+            style="border:1px solid rgba(255,255,255,0.16);background:rgba(255,255,255,0.06);border-radius:12px;padding:10px;color:rgba(255,255,255,0.92)"></textarea>
+        </label>
+      </div>
+
+      <div class="modal__actions">
+        <!-- TROCA -->
+        <button class="btn" type="button" data-close-modal="goalModal">Cancelar</button>
+        <button class="btn primary" type="submit">Salvar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Modal: Aporte -->
+  <dialog class="modal" id="contrModal" aria-label="Aporte">
+    <form class="modal__card" id="contrForm" novalidate>
+      <input type="hidden" name="goalId" />
+
+      <div class="modal__header">
+        <div>
+          <div class="modal__title" id="contrModalTitle">Aporte</div>
+          <div class="muted small">Adicionar valor na meta</div>
+        </div>
+        <!-- TROCA -->
+        <button class="icon-btn" type="button" data-close-modal="contrModal" aria-label="Fechar">✕</button>
+      </div>
+
+      <div class="grid">
+        <label class="field span-2">
+          <span>Valor do aporte</span>
+          <input name="amount" type="text" inputmode="decimal" placeholder="Ex: 200,00" required />
+        </label>
+      </div>
+
+      <div class="modal__actions">
+        <!-- TROCA -->
+        <button class="btn" type="button" data-close-modal="contrModal">Cancelar</button>
+        <button class="btn primary" type="submit">Salvar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>
