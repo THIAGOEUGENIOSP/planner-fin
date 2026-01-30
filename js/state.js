@@ -93,12 +93,20 @@ export const State = {
 
     if (!this.isLogged()) return;
 
-    await Promise.all([
+    const results = await Promise.allSettled([
       this.fetchCategories(),
       this.fetchTransactionsByMonth(monthKey),
       this.fetchBudgetsByMonth(monthKey),
       this.fetchGoals(),
     ]);
+
+    const errors = results
+      .filter((r) => r.status === "rejected")
+      .map((r) => r.reason);
+    if (errors.length) {
+      // Evita bloquear o resto da UI quando algum fetch falha
+      console.warn("syncAllForMonth: falhas no carregamento", errors);
+    }
 
     // ✅ preserva uiPrefs mesmo depois da sincronização
     this.get().uiPrefs = keepUiPrefs;

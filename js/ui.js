@@ -1356,8 +1356,12 @@ export const UI = {
         <span class="badge">${tx.length} no mês</span>
       </div>
 
-      <div style="margin-top:10px; overflow:auto;">
+      <div style="margin-top:10px; overflow:auto;" class="tx-desktop">
         ${this._txTable(tx.slice(0, 5), { showActions: false })}
+      </div>
+
+      <div style="margin-top:10px;" class="tx-mobile">
+        ${this._txMobileList(tx.slice(0, 5), { showActions: false })}
       </div>
 
       ${
@@ -1398,7 +1402,6 @@ export const UI = {
   `;
   },
 
- 
   _wireDashboard(monthKey) {
     const tx = State.listTransactionsByMonth(monthKey);
     const cats = State.listCategories();
@@ -1453,30 +1456,150 @@ export const UI = {
 
   // ------------------- TRANSACTIONS -------------------
   _transactions(monthKey) {
-    const tx = State.listTransactionsByMonth(monthKey);
-    return `
-      <section class="card">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
-          <div>
-            <div style="font-weight:800">Lançamentos do mês</div>
-            <div class="muted small">Use “+ Novo” para adicionar rapidamente</div>
-          </div>
-          <span class="badge">${tx.length} itens</span>
-        </div>
+    const tx = State.listTransactionsByMonth(monthKey) || [];
 
-        <div style="margin-top:10px; overflow:auto;">
-          ${this._txTable(tx)}
+    const desktopHtml =
+      typeof this._txTable === "function"
+        ? this._txTable(tx)
+        : `<div class="muted">Tabela não disponível.</div>`;
+
+    const mobileHtml =
+      typeof this._txMobileList === "function"
+        ? this._txMobileList(tx)
+        : `<div class="muted">Lista mobile não disponível.</div>`;
+
+    return `
+    <section class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+        <div>
+          <div style="font-weight:800">Lançamentos do mês</div>
+          <div class="muted small">Use “+ Novo” para adicionar rapidamente</div>
         </div>
-      </section>
-    `;
+        <span class="badge" id="txCountBadge">${tx.length} itens</span>
+      </div>
+
+      <div style="margin-top:10px; overflow:auto;" class="tx-desktop" id="txTableWrap">
+        ${desktopHtml}
+      </div>
+
+      <div style="margin-top:10px;" class="tx-mobile" id="txMobileWrap">
+        ${mobileHtml}
+      </div>
+
+      ${tx.length === 0 ? `<div class="muted" id="txEmptyHint" style="margin-top:12px">Sem lançamentos neste mês.</div>` : ""}
+    </section>
+  `;
   },
 
   _wireTransactions(monthKey) {
     const container = document.getElementById("appMain");
     if (!container) return;
 
-    // ⚠️ container é recriado na render, então aqui pode ficar addEventListener
-    // mas se quiser 100% seguro contra múltiplas chamadas, poderia trocar por container.onclick
+    const applyMask = (el) => {
+      el.addEventListener("input", () => {
+        el.value = Utils.moneyMaskBRL(el.value);
+        try {
+          el.setSelectionRange(el.value.length, el.value.length);
+        } catch {}
+      });
+    };
+
+    const qEl = container.querySelector("#txQ");
+    const typeEl = container.querySelector("#txType");
+    const catEl = container.querySelector("#txCat");
+    const payEl = container.querySelector("#txPay");
+    const minEl = container.querySelector("#txMin");
+    const maxEl = container.querySelector("#txMax");
+
+    const tableWrap = document.getElementById("txTableWrap"); // desktop
+    const mobileWrap = document.getElementById("txMobileWrap"); // mobile
+    const countBadge = document.getElementById("txCountBadge");
+    const emptyHint = document.getElementById("txEmptyHint");
+    const hasFilters = !!(qEl || typeEl || catEl || payEl || minEl || maxEl);
+
+    const applyResponsive = () => {
+      if (!tableWrap || !mobileWrap) return;
+      const mq = window.matchMedia("(max-width: 520px)");
+      if (mq.matches) {
+        tableWrap.style.setProperty("display", "none", "important");
+        mobileWrap.style.setProperty("display", "flex", "important");
+        mobileWrap.style.setProperty("flex-direction", "column", "important");
+        mobileWrap.style.setProperty("gap", "10px", "important");
+      } else {
+        tableWrap.style.setProperty("display", "block", "important");
+        mobileWrap.style.setProperty("display", "none", "important");
+        mobileWrap.style.removeProperty("flex-direction");
+        mobileWrap.style.removeProperty("gap");
+      }
+    };
+
+    // aplica na entrada e acompanha mudanças de tamanho
+    applyResponsive();
+    try {
+      const mq = window.matchMedia("(max-width: 520px)");
+      mq.addEventListener?.("change", applyResponsive);
+    } catch {}
+
+    if (minEl) applyMask(minEl);
+    if (maxEl) applyMask(maxEl);
+
+    const renderFiltered = () => {
+      const q = (qEl?.value || "").trim().toLowerCase();
+      const type = typeEl?.value || "";
+      const cat = catEl?.value || "";
+      const pay = payEl?.value || "";
+      const min = Utils.parseBRLToNumber(minEl?.value || "") || 0;
+      const maxRaw = Utils.parseBRLToNumber(maxEl?.value || "");
+      const max = Number.isFinite(maxRaw) ? maxRaw : null;
+
+      let tx = State.listTransactionsByMonth(monthKey);
+
+      if (q)
+        tx = tx.filter((t) =>
+          String(t.description || "")
+            .toLowerCase()
+            .includes(q),
+        );
+      if (type) tx = tx.filter((t) => t.type === type);
+      if (cat) tx = tx.filter((t) => t.categoryId === cat);
+      if (pay) tx = tx.filter((t) => (t.paymentMethod || "") === pay);
+      if (min) tx = tx.filter((t) => t.amount >= min);
+      if (max !== null) tx = tx.filter((t) => t.amount <= max);
+
+      if (tableWrap) {
+        tableWrap.innerHTML =
+          typeof this._txTable === "function"
+            ? this._txTable(tx)
+            : `<div class="muted">Tabela não disponível.</div>`;
+      }
+
+      if (mobileWrap) {
+        mobileWrap.innerHTML =
+          typeof this._txMobileList === "function"
+            ? this._txMobileList(tx)
+            : `<div class="muted">Lista mobile não disponível.</div>`;
+      }
+
+      if (countBadge) {
+        countBadge.textContent = `${tx.length} itens`;
+      }
+
+      if (emptyHint) {
+        emptyHint.style.display = tx.length === 0 ? "block" : "none";
+      }
+
+    };
+
+    if (hasFilters) {
+      // filtros
+      [qEl, typeEl, catEl, payEl, minEl, maxEl].forEach((el) => {
+        if (!el) return;
+        el.addEventListener("input", renderFiltered);
+        el.addEventListener("change", renderFiltered);
+      });
+    }
+
+    // ações (editar/excluir) - delegação no container
     container.onclick = async (e) => {
       const btn = e.target.closest("button[data-action]");
       if (!btn) return;
@@ -1498,13 +1621,19 @@ export const UI = {
         try {
           await State.deleteTransaction(id);
           this.toast("Ok", "Lançamento excluído.");
+
+          // garante estado atualizado
           await State.fetchTransactionsByMonth(monthKey).catch(() => {});
           this.render("transactions");
         } catch (err) {
           this.toast("Erro", err.message || "Falha ao excluir.");
         }
+        return;
       }
     };
+
+    // primeira renderização (somente se houver filtros na tela)
+    if (hasFilters) renderFiltered();
   },
 
   _txTable(items, opts = {}) {
@@ -1610,6 +1739,61 @@ export const UI = {
   `;
 
     return table + mobile;
+  },
+
+  _txMobileList(items, opts = {}) {
+    const showActions = opts.showActions !== false; // default true
+    const cats = new Map(State.listCategories().map((c) => [c.id, c]));
+
+    const fmt = (v) =>
+      Utils.formatCurrencyBRL(
+        v,
+        State.get().settings.locale,
+        State.get().settings.currency,
+      );
+
+    return (
+      (items || [])
+        .map((t) => {
+          const cat = cats.get(t.categoryId);
+          const catLabel = cat ? `${cat.icon} ${cat.name}` : "—";
+          const typeLabel = t.type === "income" ? "Receita" : "Despesa";
+
+          return `
+      <div class="txm-item">
+        <div class="txm-top">
+          <div style="min-width:0">
+            <div class="txm-title">${this._escape(t.description || "")}</div>
+            <div class="txm-sub">
+              <span>${this._escape(t.date || "")}</span>
+              <span>${this._escape(catLabel)}</span>
+              <span>${this._escape(typeLabel)}</span>
+              <span>${this._escape(t.paymentMethod || "—")}</span>
+            </div>
+          </div>
+
+          <div class="txm-amount">${fmt(t.amount || 0)}</div>
+        </div>
+
+        ${
+          showActions
+            ? `
+        <div class="txm-actions">
+          <button class="btn tx-btn" type="button" data-action="edit-tx" data-id="${t.id}">
+            <span class="tx-ico">✏️</span><span class="tx-txt">Editar</span>
+          </button>
+          <button class="btn tx-btn" type="button" data-action="delete-tx" data-id="${t.id}">
+            <span class="tx-ico">✖️</span><span class="tx-txt">Excluir</span>
+          </button>
+        </div>
+      `
+            : ""
+        }
+      </div>
+    `;
+        })
+        .join("") || `<div class="muted">Sem lançamentos.</div>`
+    );
   },
 
   // ------------------- CATEGORIES (CRUD) -------------------

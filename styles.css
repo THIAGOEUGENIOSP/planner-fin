@@ -718,3 +718,72 @@ select option:hover{
   #budgetTable td { vertical-align: middle; }
   .budget-bar { min-width: 120px; }
 }
+
+
+/* =========================
+   MOBILE: TRANSACTIONS LIST (CARDS)
+   ========================= */
+.tx-desktop { display: block; }
+.tx-mobile { display: none; }
+
+@media (max-width: 520px){
+  .tx-desktop { display: none; }
+  .tx-mobile { display: block; }
+
+  .txm-item{
+    border: 1px solid var(--border);
+    background: var(--panel);
+    border-radius: 14px;
+    padding: 12px;
+    box-shadow: var(--shadow);
+  }
+
+  .txm-top{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:10px;
+  }
+
+  .txm-title{
+    font-weight: 900;
+    font-size: 14px;
+    line-height: 1.2;
+  }
+
+  .txm-sub{
+    margin-top: 6px;
+    display:flex;
+    gap:10px;
+    flex-wrap:wrap;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .txm-amount{
+    font-weight: 900;
+    font-size: 16px;
+    white-space: nowrap;
+  }
+
+  .txm-actions{
+    margin-top: 10px;
+    display:flex;
+    gap:8px;
+    justify-content:flex-end;
+  }
+
+  /* no mobile: botões só ícones */
+  .txm-actions .tx-txt{ display:none; }
+  .txm-actions .btn{ padding: 10px 12px; }
+}
+
+
+/* Força visibilidade correta de lançamentos */
+.tx-desktop { display: block !important; }
+.tx-mobile { display: none !important; }
+
+@media (max-width: 520px){
+  .tx-desktop { display: none !important; }
+  .tx-mobile  { display: flex !important; flex-direction: column !important; gap: 10px !important; }
+}
