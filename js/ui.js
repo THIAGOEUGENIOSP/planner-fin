@@ -130,6 +130,127 @@ export const UI = {
     }
   },
 
+  _dashboardTransactions(monthKey) {
+    const tx = State.listTransactionsByMonth(monthKey);
+    const prefs = State.getConsultorPrefs();
+    if (!prefs.useProfileOnDashboard) return tx;
+    const profile = State.getConsultorProfile();
+    const virtual = this._buildProfileTransactions(monthKey, profile);
+    return [...virtual, ...tx];
+  },
+
+  _transactionsList(monthKey) {
+    const tx = State.listTransactionsByMonth(monthKey);
+    const prefs = State.getConsultorPrefs();
+    if (!prefs.useProfileOnTransactions) return tx;
+    const profile = State.getConsultorProfile();
+    const virtual = this._buildProfileTransactions(monthKey, profile);
+    return [...virtual, ...tx];
+  },
+
+  _buildProfileTransactions(monthKey, profile) {
+    const cats = State.listCategories();
+    const normalize = (s) =>
+      String(s || "")
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/\p{Diacritic}/gu, "");
+
+    const findCatId = (names, kind) => {
+      const nset = new Set((names || []).map(normalize));
+      const direct = cats.find((c) => {
+        if (kind && c.kind !== kind && c.kind !== "both") return false;
+        return nset.has(normalize(c.name));
+      });
+      if (direct) return direct.id;
+      const any = cats.find((c) => !kind || c.kind === kind || c.kind === "both");
+      return any?.id || "";
+    };
+
+    const today = Utils.todayISO();
+    const inMonth = (iso) => String(iso || "").slice(0, 7) === monthKey;
+    const baseDate = inMonth(today) ? today : `${monthKey}-05`;
+
+    const salary = Number(profile.salary) || 0;
+    const debtCreditCard = Number(profile.debtCreditCard) || 0;
+    const debtOverdraft = Number(profile.debtOverdraft) || 0;
+    const condoOverdue = Number(profile.condoOverdue) || 0;
+    const condoUpcoming = Number(profile.condoUpcoming) || 0;
+    const condoUpcomingDue = profile.condoUpcomingDue || `${monthKey}-15`;
+
+    const salaryCat = findCatId(["salario", "salário"], "income");
+    const houseCat = findCatId(["casa", "moradia", "condominio", "condomínio"], "expense");
+    const otherCat = findCatId(["outros", "dividas", "dívidas"], "expense");
+
+    const virtual = [];
+    const pushTx = (t) => {
+      if (!t.amount || t.amount <= 0) return;
+      virtual.push(t);
+    };
+
+    pushTx({
+      id: "virtual-income-salary",
+      type: "income",
+      date: baseDate,
+      amount: salary,
+      categoryId: salaryCat,
+      description: "Salário",
+      paymentMethod: "transferencia",
+      isVirtual: true,
+      virtualType: "salary",
+    });
+
+    pushTx({
+      id: "virtual-expense-cc",
+      type: "expense",
+      date: `${monthKey}-03`,
+      amount: debtCreditCard,
+      categoryId: otherCat,
+      description: "Dívida cartão de crédito",
+      paymentMethod: "credito",
+      isVirtual: true,
+      virtualType: "debtCreditCard",
+    });
+
+    pushTx({
+      id: "virtual-expense-od",
+      type: "expense",
+      date: `${monthKey}-04`,
+      amount: debtOverdraft,
+      categoryId: otherCat,
+      description: "Dívida cheque especial",
+      paymentMethod: "transferencia",
+      isVirtual: true,
+      virtualType: "debtOverdraft",
+    });
+
+    pushTx({
+      id: "virtual-expense-condo-overdue",
+      type: "expense",
+      date: `${monthKey}-01`,
+      amount: condoOverdue,
+      categoryId: houseCat,
+      description: "Condomínio em atraso",
+      paymentMethod: "boleto",
+      isVirtual: true,
+      virtualType: "condoOverdue",
+    });
+
+    pushTx({
+      id: "virtual-expense-condo-upcoming",
+      type: "expense",
+      date: inMonth(condoUpcomingDue) ? condoUpcomingDue : `${monthKey}-15`,
+      amount: condoUpcoming,
+      categoryId: houseCat,
+      description: "Condomínio a vencer",
+      paymentMethod: "boleto",
+      isVirtual: true,
+      virtualType: "condoUpcoming",
+    });
+
+    return virtual;
+  },
+
   // ------------------- BUDGETS -------------------
   _budgets(monthKey) {
     const allCats = State.listCategories().filter(
@@ -528,6 +649,20 @@ export const UI = {
     const contrForm = document.getElementById("contrForm");
     const contrTitle = document.getElementById("contrModalTitle");
 
+    const bindMoney = (el) => {
+      if (!el || el.dataset.moneyBound) return;
+      el.dataset.moneyBound = "1";
+      el.addEventListener("input", () => {
+        el.value = Utils.moneyMaskBRL(el.value);
+        try {
+          el.setSelectionRange(el.value.length, el.value.length);
+        } catch {}
+      });
+    };
+
+    bindMoney(goalForm?.querySelector('input[name="targetAmount"]'));
+    bindMoney(contrForm?.querySelector('input[name="amount"]'));
+
     const openGoalCreate = () => {
       goalTitle.textContent = "Nova meta";
       goalForm.reset();
@@ -654,7 +789,10 @@ export const UI = {
 
   // ------------------- CONSULTOR -------------------
   _consultor(monthKey) {
-    const a = State.analyzeMonth(monthKey);
+    const a = this._analyzeTransactions(
+      this._transactionsList(monthKey),
+      monthKey,
+    );
     const fmt = (v) =>
       Utils.formatCurrencyBRL(
         v,
@@ -663,6 +801,13 @@ export const UI = {
       );
     const pct = (v) => `${(v * 100).toFixed(0)}%`;
     const cats = new Map(State.listCategories().map((c) => [c.id, c]));
+    const brlInput = (v) => Utils.formatNumberBRL(v);
+    const fmtDate = (iso) => {
+      if (!iso) return "—";
+      const [y, m, d] = String(iso).split("-");
+      if (!y || !m || !d) return "—";
+      return `${d}/${m}/${y}`;
+    };
 
     const score = this._calcScore(a);
     const scoreLabel =
@@ -676,52 +821,71 @@ export const UI = {
 
     const plan = this._buildPlan(a);
 
-    // --- Sugestão de orçamentos: média últimos 3 meses ---
-    const prevMonthKey = (mk) => {
-      const [y, m] = mk.split("-").map(Number);
-      const d = new Date(y, m - 1, 1);
-      d.setMonth(d.getMonth() - 1);
-      const yy = d.getFullYear();
-      const mm = String(d.getMonth() + 1).padStart(2, "0");
-      return `${yy}-${mm}`;
-    };
+    const profile = State.getConsultorProfile();
+    const prefs = State.getConsultorPrefs();
+    const essentialIds = new Set(prefs.essentialCategoryIds || []);
 
-    const m1 = prevMonthKey(monthKey);
-    const m2 = prevMonthKey(m1);
-    const m3 = prevMonthKey(m2);
+    const salary = Number(profile.salary) || a.income || 0;
+    const debtCreditCard = Number(profile.debtCreditCard) || 0;
+    const debtOverdraft = Number(profile.debtOverdraft) || 0;
+    const condoOverdue = Number(profile.condoOverdue) || 0;
+    const condoUpcoming = Number(profile.condoUpcoming) || 0;
+    const condoUpcomingDue = profile.condoUpcomingDue || "";
 
-    const sumCatMonth = (mk) => {
-      const txm = State.listTransactionsByMonth(mk).filter(
-        (t) => t.type === "expense",
-      );
-      const map = new Map();
-      for (const t of txm)
-        map.set(t.categoryId, (map.get(t.categoryId) || 0) + t.amount);
-      return map;
-    };
+    const totalDebt =
+      debtCreditCard + debtOverdraft + condoOverdue + condoUpcoming;
+    const urgentDebt = condoOverdue + condoUpcoming;
 
-    const a1 = sumCatMonth(m1);
-    const a2 = sumCatMonth(m2);
-    const a3 = sumCatMonth(m3);
+    const debtPaymentTarget =
+      Number(prefs.debtPaymentTarget) > 0
+        ? Number(prefs.debtPaymentTarget)
+        : Math.round(salary * 0.3);
+    const debtMonths =
+      debtPaymentTarget > 0 ? Math.ceil(totalDebt / debtPaymentTarget) : null;
 
-    // média 3 meses
-    const avg3 = new Map();
-    for (const [catId] of cats.entries()) {
-      const v =
-        (a1.get(catId) || 0) + (a2.get(catId) || 0) + (a3.get(catId) || 0);
-      const avg = v / 3;
-      if (avg > 0) avg3.set(catId, avg);
-    }
+    const debtPlan = this._buildDebtPlan(
+      {
+        salary,
+        debtCreditCard,
+        debtOverdraft,
+        condoOverdue,
+        condoUpcoming,
+        condoUpcomingDue,
+        debtPaymentTarget,
+      },
+      a,
+    );
 
-    // sugestões (média + 10%)
-    const suggestions = Array.from(avg3.entries())
-      .map(([catId, avg]) => ({
-        catId,
-        avg,
-        suggested: avg * 1.1,
-      }))
-      .sort((x, y) => y.suggested - x.suggested)
-      .slice(0, 5);
+    const debtItems = [
+      { label: "Cartão de crédito", value: debtCreditCard },
+      { label: "Cheque especial", value: debtOverdraft },
+      { label: "Condomínio em atraso", value: condoOverdue },
+      { label: "Condomínio a vencer", value: condoUpcoming },
+    ].filter((x) => x.value > 0);
+
+    const easyGoals = this._buildEasyGoals({
+      salary,
+      debtPaymentTarget,
+      condoOverdue,
+      condoUpcoming,
+      condoUpcomingDue,
+    });
+    const easyGoalsStatus = prefs.easyGoalsStatus || {};
+    const easyGoalsDone = easyGoals.filter((g) => easyGoalsStatus[g.id]).length;
+    const easyGoalsTotal = easyGoals.length || 1;
+    const easyGoalsPct = Math.round((easyGoalsDone / easyGoalsTotal) * 100);
+
+    const expenseTx = State.listTransactionsByMonth(monthKey).filter(
+      (t) => t.type === "expense",
+    );
+    const unnecessaryTx = expenseTx.filter(
+      (t) => !essentialIds.has(t.categoryId),
+    );
+
+    const budgetMode = prefs.budgetSuggestionMode || "monthly";
+    const budgetData = this._budgetSuggestions(monthKey, budgetMode, cats);
+    const suggestions = budgetData.items;
+    const budgetLabel = budgetData.label;
 
     return `
     <section class="card">
@@ -789,6 +953,232 @@ export const UI = {
     <section class="card" style="margin-top:12px">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
         <div>
+          <div style="font-weight:800">Seu cenário financeiro</div>
+          <div class="muted small">Use os campos abaixo para ajustar os números</div>
+        </div>
+        <span class="badge">Total de dívidas: ${fmt(totalDebt)}</span>
+      </div>
+
+      <form class="grid" id="consultorProfileForm" style="margin-top:12px">
+        <label class="field">
+          <span>Salário líquido</span>
+          <input id="consultorSalary" type="text" inputmode="decimal" value="${brlInput(
+            salary,
+          )}" />
+        </label>
+
+        <label class="field">
+          <span>Cartão de crédito</span>
+          <input id="consultorCC" type="text" inputmode="decimal" value="${brlInput(
+            debtCreditCard,
+          )}" />
+        </label>
+
+        <label class="field">
+          <span>Cheque especial</span>
+          <input id="consultorOverdraft" type="text" inputmode="decimal" value="${brlInput(
+            debtOverdraft,
+          )}" />
+        </label>
+
+        <label class="field">
+          <span>Condomínio em atraso</span>
+          <input id="consultorCondoOverdue" type="text" inputmode="decimal" value="${brlInput(
+            condoOverdue,
+          )}" />
+        </label>
+
+        <label class="field">
+          <span>Condomínio a vencer</span>
+          <input id="consultorCondoUpcoming" type="text" inputmode="decimal" value="${brlInput(
+            condoUpcoming,
+          )}" />
+        </label>
+
+        <label class="field">
+          <span>Vencimento (condomínio)</span>
+          <input id="consultorCondoDue" type="date" value="${this._escape(
+            condoUpcomingDue,
+          )}" />
+        </label>
+
+        <label class="field span-2">
+          <span>Meta mensal para pagar dívidas</span>
+          <input id="consultorDebtTarget" type="text" inputmode="decimal" value="${brlInput(
+            debtPaymentTarget,
+          )}" />
+        </label>
+
+        <label class="field span-2" style="flex-direction:row;align-items:center;gap:10px">
+          <input id="consultorUseDashboard" type="checkbox" ${
+            prefs.useProfileOnDashboard ? "checked" : ""
+          } />
+          <span>Aplicar estes valores no Dashboard</span>
+        </label>
+
+        <label class="field span-2" style="flex-direction:row;align-items:center;gap:10px">
+          <input id="consultorUseTransactions" type="checkbox" ${
+            prefs.useProfileOnTransactions ? "checked" : ""
+          } />
+          <span>Aplicar estes valores na aba Lançamentos</span>
+        </label>
+
+        <div class="field span-2" style="align-items:flex-end">
+          <span>&nbsp;</span>
+          <button class="btn primary" type="submit">Salvar números</button>
+        </div>
+      </form>
+
+      <div class="row" style="margin-top:12px">
+        <div class="card">
+          <div class="muted small">Dívida urgente</div>
+          <div style="font-size:20px;font-weight:800;margin-top:6px">${fmt(
+            urgentDebt,
+          )}</div>
+          <div class="muted small" style="margin-top:6px">Priorize condomínio em atraso + próximo vencimento.</div>
+        </div>
+        <div class="card">
+          <div class="muted small">Meta mensal (dívidas)</div>
+          <div style="font-size:20px;font-weight:800;margin-top:6px">${fmt(
+            debtPaymentTarget,
+          )}</div>
+          <div class="muted small" style="margin-top:6px">${
+            debtMonths ? `Quita em ~${debtMonths} meses` : "Defina uma meta mensal"
+          }</div>
+        </div>
+        <div class="card">
+          <div class="muted small">Próximo vencimento condomínio</div>
+          <div style="font-size:20px;font-weight:800;margin-top:6px">${fmtDate(
+            condoUpcomingDue,
+          )}</div>
+          <div class="muted small" style="margin-top:6px">Reserve ${fmt(
+            condoUpcoming,
+          )} até essa data.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" style="margin-top:12px">
+      <div style="font-weight:800">Gráficos de organização</div>
+      <div class="row" style="margin-top:10px">
+        <div class="card" style="flex:1;min-width:260px">
+          <div class="muted small">Composição das dívidas</div>
+          <div style="margin-top:10px">
+            ${Charts.donutChartSVG({ items: debtItems, size: 220 })}
+          </div>
+        </div>
+        <div class="card" style="flex:1;min-width:260px">
+          <div class="muted small">Fluxo do mês (estimado)</div>
+          <div style="margin-top:10px">
+            ${Charts.barChartSVG({
+              labels: ["Salário", "Despesas mês", "Meta dívidas"],
+              values: [salary, a.expense, debtPaymentTarget],
+              height: 180,
+              width: 520,
+            })}
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" style="margin-top:12px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+        <div>
+          <div style="font-weight:800">Plano de reorganização (passo a passo)</div>
+          <div class="muted small">Foco em dívidas e fluxo de caixa</div>
+        </div>
+        <button class="btn" id="btnCopyDebtPlan" type="button">Copiar plano</button>
+      </div>
+
+      <ol style="margin-top:10px">
+        ${debtPlan.map((p) => `<li style="margin:10px 0">${this._escape(p)}</li>`).join("")}
+      </ol>
+
+      <div class="muted small" style="margin-top:10px">
+        Ordem de ataque sugerida: condomínio (urgente) → cheque especial → cartão de crédito.
+      </div>
+    </section>
+
+    <section class="card" style="margin-top:12px">
+      <div style="font-weight:800">Categorias essenciais</div>
+      <div class="muted small">Marque o que é essencial. O restante vira "gasto desnecessário".</div>
+
+      <div class="grid" style="margin-top:12px">
+        ${Array.from(cats.values())
+          .filter((c) => c.kind === "expense" || c.kind === "both")
+          .map(
+            (c) => `
+          <label class="field" style="flex-direction:row;align-items:center;gap:10px">
+            <input type="checkbox" data-essential-id="${c.id}" ${
+              essentialIds.has(c.id) ? "checked" : ""
+            } />
+            <span>${this._escape(`${c.icon} ${c.name}`)}</span>
+          </label>
+        `,
+          )
+          .join("")}
+      </div>
+    </section>
+
+    <section class="card" style="margin-top:12px">
+      <div style="font-weight:800">Gastos desnecessários do mês</div>
+      <div class="muted small">Para cada gasto, reflita antes de repetir.</div>
+
+      <div style="margin-top:10px">
+        ${
+          unnecessaryTx.length
+            ? `<ul class="muted" style="margin-top:8px">
+              ${unnecessaryTx
+                .map((t) => {
+                  const c = cats.get(t.categoryId);
+                  const name = c ? `${c.icon} ${c.name}` : "—";
+                  return `<li>${this._escape(
+                    t.description,
+                  )} • ${this._escape(name)} • ${fmt(
+                    t.amount,
+                  )} — Me aproxima ou me distancia dos meu sonhos e objetivos</li>`;
+                })
+                .join("")}
+            </ul>`
+            : `<div class="muted" style="margin-top:8px">Sem gastos desnecessários identificados.</div>`
+        }
+      </div>
+    </section>
+
+    <section class="card" style="margin-top:12px">
+      <div style="font-weight:800">Metas fáceis (checklist)</div>
+      <div class="muted small">Pequenas vitórias para manter o ritmo.</div>
+
+      <div class="row" style="margin-top:10px">
+        <div class="card" style="flex:1;min-width:220px">
+          <div class="muted small">Progresso</div>
+          <div style="font-size:22px;font-weight:900;margin-top:6px">${easyGoalsPct}%</div>
+          <div class="muted small" style="margin-top:6px">${easyGoalsDone} de ${easyGoalsTotal} concluídas</div>
+          <div class="budget-bar ok" style="margin-top:10px">
+            <div style="width:${easyGoalsPct}%"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid" style="margin-top:12px">
+        ${easyGoals
+          .map(
+            (g) => `
+          <label class="field" style="flex-direction:row;align-items:center;gap:10px">
+            <input type="checkbox" data-easy-goal="${g.id}" ${
+              easyGoalsStatus[g.id] ? "checked" : ""
+            } />
+            <span>${this._escape(g.text)}</span>
+          </label>
+        `,
+          )
+          .join("")}
+      </div>
+    </section>
+
+    <section class="card" style="margin-top:12px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+        <div>
           <div style="font-weight:800">Plano de ação sugerido</div>
           <div class="muted small">3 passos práticos para o próximo mês</div>
         </div>
@@ -808,11 +1198,17 @@ export const UI = {
   <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
     <div>
       <div style="font-weight:800">Sugestão de orçamentos</div>
-      <div class="muted small">Base: média dos últimos 3 meses (+10% folga)</div>
+      <div class="muted small">${this._escape(budgetLabel)} (+10% folga)</div>
     </div>
-    <button class="btn primary" id="btnApplyBudgetSuggestions" type="button">
-      Aplicar no mês
-    </button>
+    <div style="display:flex;gap:10px;align-items:center">
+      <select id="budgetSuggestionMode" class="btn">
+        <option value="monthly" ${budgetMode === "monthly" ? "selected" : ""}>Mensal</option>
+        <option value="quarterly" ${budgetMode === "quarterly" ? "selected" : ""}>Trimestral</option>
+      </select>
+      <button class="btn primary" id="btnApplyBudgetSuggestions" type="button">
+        Aplicar no mês
+      </button>
+    </div>
   </div>
 
   <div style="margin-top:10px; overflow:auto">
@@ -820,7 +1216,7 @@ export const UI = {
       <thead>
         <tr>
           <th>Categoria</th>
-          <th>Média (3m)</th>
+          <th>Base</th>
           <th>Sugestão</th>
         </tr>
       </thead>
@@ -854,52 +1250,160 @@ export const UI = {
   `;
   },
 
+  _analyzeTransactions(tx, monthKey) {
+    const incomeTx = (tx || []).filter((t) => t.type === "income");
+    const expenseTx = (tx || []).filter((t) => t.type === "expense");
+
+    const income = incomeTx.reduce((a, b) => a + b.amount, 0);
+    const expense = expenseTx.reduce((a, b) => a + b.amount, 0);
+    const balance = income - expense;
+
+    const savingRate = income > 0 ? balance / income : 0;
+
+    const cats = new Map(State.listCategories().map((c) => [c.id, c]));
+    const byCat = new Map();
+    for (const t of expenseTx) {
+      byCat.set(t.categoryId, (byCat.get(t.categoryId) || 0) + t.amount);
+    }
+
+    const topCats = [...byCat.entries()]
+      .map(([catId, total]) => ({ catId, total, cat: cats.get(catId) }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 5);
+
+    const alerts = [];
+    if (income > 0 && expense > income)
+      alerts.push("Você gastou mais do que ganhou neste mês.");
+    if (income > 0 && savingRate < 0.1)
+      alerts.push("Sua taxa de poupança está baixa (abaixo de 10%).");
+    if (income > 0 && expense / income > 0.8)
+      alerts.push("Despesas acima de 80% da renda (alto risco).");
+
+    return {
+      monthKey,
+      income,
+      expense,
+      balance,
+      savingRate,
+      topCats,
+      alerts,
+    };
+  },
+
   _wireConsultor() {
+    const applyMask = (el) => {
+      if (!el || el.dataset.moneyBound) return;
+      el.dataset.moneyBound = "1";
+      el.addEventListener("input", () => {
+        el.value = Utils.moneyMaskBRL(el.value);
+        try {
+          el.setSelectionRange(el.value.length, el.value.length);
+        } catch {}
+      });
+    };
+
+    const profileForm = document.getElementById("consultorProfileForm");
+    const salaryEl = document.getElementById("consultorSalary");
+    const ccEl = document.getElementById("consultorCC");
+    const odEl = document.getElementById("consultorOverdraft");
+    const condoOverdueEl = document.getElementById("consultorCondoOverdue");
+    const condoUpcomingEl = document.getElementById("consultorCondoUpcoming");
+    const condoDueEl = document.getElementById("consultorCondoDue");
+    const debtTargetEl = document.getElementById("consultorDebtTarget");
+    const useDashboardEl = document.getElementById("consultorUseDashboard");
+    const useTransactionsEl = document.getElementById(
+      "consultorUseTransactions",
+    );
+
+    [salaryEl, ccEl, odEl, condoOverdueEl, condoUpcomingEl, debtTargetEl].forEach(
+      applyMask,
+    );
+
+    if (profileForm) {
+      profileForm.onsubmit = (e) => {
+        e.preventDefault();
+
+        const salary = Utils.parseBRLToNumber(String(salaryEl?.value || ""));
+        const debtCreditCard = Utils.parseBRLToNumber(String(ccEl?.value || ""));
+        const debtOverdraft = Utils.parseBRLToNumber(String(odEl?.value || ""));
+        const condoOverdue = Utils.parseBRLToNumber(
+          String(condoOverdueEl?.value || ""),
+        );
+        const condoUpcoming = Utils.parseBRLToNumber(
+          String(condoUpcomingEl?.value || ""),
+        );
+        const condoUpcomingDue = String(condoDueEl?.value || "").trim();
+        const debtPaymentTarget = Utils.parseBRLToNumber(
+          String(debtTargetEl?.value || ""),
+        );
+        const useProfileOnDashboard = !!useDashboardEl?.checked;
+        const useProfileOnTransactions = !!useTransactionsEl?.checked;
+
+        State.setConsultorProfile({
+          salary: Number.isFinite(salary) ? salary : 0,
+          debtCreditCard: Number.isFinite(debtCreditCard) ? debtCreditCard : 0,
+          debtOverdraft: Number.isFinite(debtOverdraft) ? debtOverdraft : 0,
+          condoOverdue: Number.isFinite(condoOverdue) ? condoOverdue : 0,
+          condoUpcoming: Number.isFinite(condoUpcoming) ? condoUpcoming : 0,
+          condoUpcomingDue: condoUpcomingDue || "",
+        });
+
+        State.setConsultorPrefs({
+          debtPaymentTarget: Number.isFinite(debtPaymentTarget)
+            ? debtPaymentTarget
+            : 0,
+          useProfileOnDashboard,
+          useProfileOnTransactions,
+        });
+
+        this.toast("Ok", "Números atualizados.");
+        this.render("consultor");
+      };
+    }
+
+    document
+      .querySelectorAll("input[data-essential-id]")
+      .forEach((el) => {
+        el.addEventListener("change", () => {
+          const ids = Array.from(
+            document.querySelectorAll("input[data-essential-id]:checked"),
+          ).map((i) => i.getAttribute("data-essential-id"));
+
+          State.setConsultorPrefs({ essentialCategoryIds: ids.filter(Boolean) });
+          this.render("consultor");
+        });
+      });
+
+    document
+      .querySelectorAll("input[data-easy-goal]")
+      .forEach((el) => {
+        el.addEventListener("change", () => {
+          const map = { ...(State.getConsultorPrefs().easyGoalsStatus || {}) };
+          const id = el.getAttribute("data-easy-goal");
+          if (!id) return;
+          map[id] = !!el.checked;
+          State.setConsultorPrefs({ easyGoalsStatus: map });
+          this.render("consultor");
+        });
+      });
+
+    const budgetModeEl = document.getElementById("budgetSuggestionMode");
+    budgetModeEl?.addEventListener("change", () => {
+      State.setConsultorPrefs({ budgetSuggestionMode: budgetModeEl.value });
+      this.render("consultor");
+    });
+
     document
       .getElementById("btnApplyBudgetSuggestions")
       ?.addEventListener("click", async () => {
         const monthKey = State.get().settings.monthKey;
+        const budgetMode =
+          document.getElementById("budgetSuggestionMode")?.value || "monthly";
 
-        // mesmo cálculo da UI (repete aqui pra não depender de variável local)
-        const prevMonthKey = (mk) => {
-          const [y, m] = mk.split("-").map(Number);
-          const d = new Date(y, m - 1, 1);
-          d.setMonth(d.getMonth() - 1);
-          const yy = d.getFullYear();
-          const mm = String(d.getMonth() + 1).padStart(2, "0");
-          return `${yy}-${mm}`;
-        };
-
-        const cats = State.listCategories();
-        const m1 = prevMonthKey(monthKey);
-        const m2 = prevMonthKey(m1);
-        const m3 = prevMonthKey(m2);
-
-        const sumCatMonth = (mk) => {
-          const txm = State.listTransactionsByMonth(mk).filter(
-            (t) => t.type === "expense",
-          );
-          const map = new Map();
-          for (const t of txm)
-            map.set(t.categoryId, (map.get(t.categoryId) || 0) + t.amount);
-          return map;
-        };
-
-        const a1 = sumCatMonth(m1);
-        const a2 = sumCatMonth(m2);
-        const a3 = sumCatMonth(m3);
-
-        const avg3 = new Map();
-        for (const c of cats) {
-          const v =
-            (a1.get(c.id) || 0) + (a2.get(c.id) || 0) + (a3.get(c.id) || 0);
-          const avg = v / 3;
-          if (avg > 0) avg3.set(c.id, avg);
-        }
-
-        const suggestions = Array.from(avg3.entries())
-          .map(([catId, avg]) => ({ catId, suggested: avg * 1.1 }))
-          .sort((x, y) => y.suggested - x.suggested)
+        const cats = new Map(State.listCategories().map((c) => [c.id, c]));
+        const data = this._budgetSuggestions(monthKey, budgetMode, cats);
+        const suggestions = data.items
+          .map((x) => ({ catId: x.catId, suggested: x.suggested }))
           .slice(0, 5);
 
         if (!suggestions.length) {
@@ -922,6 +1426,45 @@ export const UI = {
         } catch (e) {
           this.toast("Erro", e?.message || "Falha ao aplicar sugestões.");
         }
+      });
+
+    const btnDebtPlan = document.getElementById("btnCopyDebtPlan");
+    btnDebtPlan &&
+      (btnDebtPlan.onclick = () => {
+        const a = State.analyzeMonth(State.get().settings.monthKey);
+        const profile = State.getConsultorProfile();
+        const prefs = State.getConsultorPrefs();
+        const salary = Number(profile.salary) || a.income || 0;
+        const debtPaymentTarget =
+          Number(prefs.debtPaymentTarget) > 0
+            ? Number(prefs.debtPaymentTarget)
+            : Math.round(salary * 0.3);
+
+        const plan = this._buildDebtPlan(
+          {
+            salary,
+            debtCreditCard: Number(profile.debtCreditCard) || 0,
+            debtOverdraft: Number(profile.debtOverdraft) || 0,
+            condoOverdue: Number(profile.condoOverdue) || 0,
+            condoUpcoming: Number(profile.condoUpcoming) || 0,
+            condoUpcomingDue: profile.condoUpcomingDue || "",
+            debtPaymentTarget,
+          },
+          a,
+        );
+
+        const text =
+          `Consultor - Plano de reorganização (${State.get().settings.monthKey})\n` +
+          plan.map((p, i) => `${i + 1}. ${p}`).join("\n");
+
+        navigator.clipboard
+          ?.writeText(text)
+          .then(() => {
+            this.toast("Copiado", "Plano de reorganização copiado.");
+          })
+          .catch(() => {
+            this.toast("Ops", "Não consegui copiar automaticamente.");
+          });
       });
 
     const btn = document.getElementById("btnCopyPlan");
@@ -1020,6 +1563,182 @@ export const UI = {
     );
 
     return plan.slice(0, 3);
+  },
+
+  _buildDebtPlan(profile, a) {
+    const fmt = (v) =>
+      Utils.formatCurrencyBRL(
+        v,
+        State.get().settings.locale,
+        State.get().settings.currency,
+      );
+    const fmtDate = (iso) => {
+      if (!iso) return "—";
+      const [y, m, d] = String(iso).split("-");
+      if (!y || !m || !d) return "—";
+      return `${d}/${m}/${y}`;
+    };
+
+    const steps = [];
+
+    if (profile.condoOverdue > 0) {
+      steps.push(
+        `Quite o condomínio em atraso (${fmt(profile.condoOverdue)}) hoje. Isso evita juros, multa e riscos de cobrança.`,
+      );
+    }
+
+    if (profile.condoUpcoming > 0) {
+      steps.push(
+        `Separe ${fmt(profile.condoUpcoming)} até ${fmtDate(
+          profile.condoUpcomingDue,
+        )} para o próximo vencimento do condomínio.`,
+      );
+    }
+
+    if (profile.debtOverdraft > 0) {
+      steps.push(
+        `Ataque o cheque especial primeiro (${fmt(
+          profile.debtOverdraft,
+        )}). É a dívida mais cara. Direcione o máximo possível até zerar.`,
+      );
+    }
+
+    if (profile.debtCreditCard > 0) {
+      steps.push(
+        `Após o cheque especial, concentre pagamentos no cartão (${fmt(
+          profile.debtCreditCard,
+        )}). Evite novas compras parceladas e negocie juros/parcelamento se necessário.`,
+      );
+    }
+
+    if (profile.debtPaymentTarget > 0) {
+      steps.push(
+        `Reserve ${fmt(
+          profile.debtPaymentTarget,
+        )} por mês exclusivamente para dívidas. Trate como conta fixa.`,
+      );
+    } else if (profile.salary > 0) {
+      const suggested = Math.round(profile.salary * 0.3);
+      steps.push(
+        `Defina uma meta mensal para dívidas. Sugestão inicial: ${fmt(
+          suggested,
+        )} (cerca de 30% do salário).`,
+      );
+    }
+
+    if (a?.income > 0) {
+      steps.push(
+        "Corte ou pause gastos não essenciais e revise assinaturas. Cada ajuste acelera a quitação.",
+      );
+    }
+
+    return steps.slice(0, 7);
+  },
+
+  _buildEasyGoals({ salary, debtPaymentTarget, condoOverdue, condoUpcoming, condoUpcomingDue }) {
+    const fmt = (v) =>
+      Utils.formatCurrencyBRL(
+        v,
+        State.get().settings.locale,
+        State.get().settings.currency,
+      );
+    const fmtDate = (iso) => {
+      if (!iso) return "—";
+      const [y, m, d] = String(iso).split("-");
+      if (!y || !m || !d) return "—";
+      return `${d}/${m}/${y}`;
+    };
+
+    const weekly = debtPaymentTarget > 0 ? Math.round(debtPaymentTarget / 4) : 0;
+
+    const goals = [];
+    if (condoOverdue > 0) {
+      goals.push({
+        id: "goal-condo-overdue",
+        text: `Pagar condomínio em atraso (${fmt(condoOverdue)})`,
+      });
+    }
+    if (condoUpcoming > 0) {
+      goals.push({
+        id: "goal-condo-upcoming",
+        text: `Separar ${fmt(condoUpcoming)} até ${fmtDate(condoUpcomingDue)}`,
+      });
+    }
+    if (weekly > 0) {
+      goals.push({
+        id: "goal-weekly-debt",
+        text: `Guardar ${fmt(weekly)} por semana para dívidas`,
+      });
+    }
+    if (salary > 0) {
+      goals.push({
+        id: "goal-weekly-limit",
+        text: `Definir teto semanal de gastos não essenciais (ex.: ${fmt(
+          Math.round(salary * 0.1),
+        )})`,
+      });
+    }
+    goals.push({
+      id: "goal-review",
+      text: "Revisar gastos desnecessários do mês e escolher 1 corte",
+    });
+
+    return goals.slice(0, 5);
+  },
+
+  _budgetSuggestions(monthKey, mode, catsMap) {
+    const cats = catsMap instanceof Map ? catsMap : new Map(catsMap);
+
+    const prevMonthKey = (mk) => {
+      const [y, m] = mk.split("-").map(Number);
+      const d = new Date(y, m - 1, 1);
+      d.setMonth(d.getMonth() - 1);
+      const yy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      return `${yy}-${mm}`;
+    };
+
+    const sumCatMonth = (mk) => {
+      const txm = State.listTransactionsByMonth(mk).filter(
+        (t) => t.type === "expense",
+      );
+      const map = new Map();
+      for (const t of txm)
+        map.set(t.categoryId, (map.get(t.categoryId) || 0) + t.amount);
+      return map;
+    };
+
+    const months = mode === "quarterly" ? 3 : 1;
+    let key = monthKey;
+    const series = [];
+    for (let i = 0; i < months; i++) {
+      key = prevMonthKey(key);
+      series.push(sumCatMonth(key));
+    }
+
+    const avgMap = new Map();
+    for (const [catId] of cats.entries()) {
+      let sum = 0;
+      for (const m of series) sum += m.get(catId) || 0;
+      const avg = sum / months;
+      if (avg > 0) avgMap.set(catId, avg);
+    }
+
+    const items = Array.from(avgMap.entries())
+      .map(([catId, avg]) => ({
+        catId,
+        avg,
+        suggested: avg * 1.1,
+      }))
+      .sort((x, y) => y.suggested - x.suggested)
+      .slice(0, 5);
+
+    const label =
+      mode === "quarterly"
+        ? "Base: média trimestral (últimos 3 meses)"
+        : "Base: mês anterior";
+
+    return { items, label };
   },
 
   async _wireGoals() {
@@ -1246,7 +1965,18 @@ export const UI = {
         return;
       }
 
-      const tx = State.listTransactionsInRange(start, end);
+      let tx = State.listTransactionsInRange(start, end);
+      const prefs = State.getConsultorPrefs();
+      if (prefs.useProfileOnTransactions) {
+        const virtual = this._buildProfileTransactions(
+          mk,
+          State.getConsultorProfile(),
+        );
+        const filteredVirtual = virtual.filter(
+          (t) => t.date >= start && t.date <= end,
+        );
+        tx = [...filteredVirtual, ...tx];
+      }
 
       const income = tx
         .filter((t) => t.type === "income")
@@ -1311,7 +2041,7 @@ export const UI = {
   // ------------------- DASHBOARD -------------------
   _dashboard(monthKey) {
     const s = State.get();
-    const tx = State.listTransactionsByMonth(monthKey);
+    const tx = this._dashboardTransactions(monthKey);
 
     const income = tx
       .filter((t) => t.type === "income")
@@ -1403,7 +2133,7 @@ export const UI = {
   },
 
   _wireDashboard(monthKey) {
-    const tx = State.listTransactionsByMonth(monthKey);
+    const tx = this._dashboardTransactions(monthKey);
     const cats = State.listCategories();
 
     const chartBar = document.getElementById("dashChartBar");
@@ -1429,6 +2159,12 @@ export const UI = {
         labels,
         values,
         height: 180,
+        valueFormatter: (v) =>
+          Utils.formatCurrencyBRL(
+            v,
+            State.get().settings.locale,
+            State.get().settings.currency,
+          ),
       });
     }
 
@@ -1456,7 +2192,7 @@ export const UI = {
 
   // ------------------- TRANSACTIONS -------------------
   _transactions(monthKey) {
-    const tx = State.listTransactionsByMonth(monthKey) || [];
+    const tx = this._transactionsList(monthKey) || [];
 
     const desktopHtml =
       typeof this._txTable === "function"
@@ -1553,6 +2289,10 @@ export const UI = {
       const max = Number.isFinite(maxRaw) ? maxRaw : null;
 
       let tx = State.listTransactionsByMonth(monthKey);
+      const prefs = State.getConsultorPrefs();
+      if (prefs.useProfileOnTransactions) {
+        tx = this._transactionsList(monthKey);
+      }
 
       if (q)
         tx = tx.filter((t) =>
@@ -1607,7 +2347,21 @@ export const UI = {
       const action = btn.getAttribute("data-action");
       const id = btn.getAttribute("data-id");
 
+      const list = this._transactionsList(monthKey);
+      const tx = list.find((t) => t.id === id);
+
       if (action === "edit-tx") {
+        if (tx?.isVirtual && window.PF?.openPrefillTransaction) {
+          await window.PF.openPrefillTransaction({
+            type: tx.type,
+            date: tx.date,
+            description: tx.description,
+            amount: tx.amount,
+            categoryId: tx.categoryId,
+            paymentMethod: tx.paymentMethod || "pix",
+          });
+          return;
+        }
         if (window.PF?.openEditTransaction) {
           await window.PF.openEditTransaction(id);
         }
@@ -1619,8 +2373,20 @@ export const UI = {
         if (!ok) return;
 
         try {
-          await State.deleteTransaction(id);
-          this.toast("Ok", "Lançamento excluído.");
+          if (tx?.isVirtual) {
+            const patch = {};
+            if (tx.virtualType === "salary") patch.salary = 0;
+            if (tx.virtualType === "debtCreditCard") patch.debtCreditCard = 0;
+            if (tx.virtualType === "debtOverdraft") patch.debtOverdraft = 0;
+            if (tx.virtualType === "condoOverdue") patch.condoOverdue = 0;
+            if (tx.virtualType === "condoUpcoming") patch.condoUpcoming = 0;
+
+            State.setConsultorProfile(patch);
+            this.toast("Ok", "Lançamento removido.");
+          } else {
+            await State.deleteTransaction(id);
+            this.toast("Ok", "Lançamento excluído.");
+          }
 
           // garante estado atualizado
           await State.fetchTransactionsByMonth(monthKey).catch(() => {});
@@ -1758,7 +2524,6 @@ export const UI = {
           const cat = cats.get(t.categoryId);
           const catLabel = cat ? `${cat.icon} ${cat.name}` : "—";
           const typeLabel = t.type === "income" ? "Receita" : "Despesa";
-
           return `
       <div class="txm-item">
         <div class="txm-top">

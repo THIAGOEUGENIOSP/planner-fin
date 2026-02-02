@@ -150,6 +150,20 @@ function wireQuickAdd() {
   const modal = document.getElementById("quickAddModal");
   const form = document.getElementById("quickAddForm");
   const catSelect = document.getElementById("quickAddCategory");
+  const amountInput = form?.querySelector('input[name="amount"]');
+
+  if (amountInput && !amountInput.dataset.moneyBound) {
+    amountInput.dataset.moneyBound = "1";
+    amountInput.addEventListener("input", () => {
+      amountInput.value = Utils.moneyMaskBRL(amountInput.value);
+      try {
+        amountInput.setSelectionRange(
+          amountInput.value.length,
+          amountInput.value.length,
+        );
+      } catch {}
+    });
+  }
 
   const getType = () =>
     String(form?.querySelector('select[name="type"]')?.value || "expense");
@@ -191,6 +205,33 @@ function wireQuickAdd() {
 
   // ✅ função global para abrir em modo EDITAR (UI vai chamar)
   window.PF = window.PF || {};
+  window.PF.openPrefillTransaction = async (payload) => {
+    if (!currentSession) return;
+
+    await State.fetchCategories();
+    fillCategories();
+
+    form.reset();
+    form.querySelector('input[name="id"]').value = "";
+
+    if (payload?.type)
+      form.querySelector('select[name="type"]').value = payload.type;
+    fillCategories();
+
+    form.querySelector('input[name="date"]').value =
+      payload?.date || Utils.todayISO();
+    form.querySelector('input[name="description"]').value =
+      payload?.description || "";
+    form.querySelector('input[name="amount"]').value = Utils.formatNumberBRL(
+      payload?.amount || 0,
+    );
+    form.querySelector('select[name="categoryId"]').value =
+      payload?.categoryId || "";
+    form.querySelector('select[name="paymentMethod"]').value =
+      payload?.paymentMethod || "pix";
+
+    modal.showModal();
+  };
   window.PF.openEditTransaction = async (txId) => {
     if (!currentSession) return;
 
@@ -215,9 +256,9 @@ function wireQuickAdd() {
     fillCategories(); // depois de setar type
     form.querySelector('input[name="date"]').value = tx.date;
     form.querySelector('input[name="description"]').value = tx.description;
-    form.querySelector('input[name="amount"]').value = String(
+    form.querySelector('input[name="amount"]').value = Utils.formatNumberBRL(
       tx.amount,
-    ).replace(".", ",");
+    );
     form.querySelector('select[name="categoryId"]').value = tx.categoryId;
     form.querySelector('select[name="paymentMethod"]').value =
       tx.paymentMethod || "pix";

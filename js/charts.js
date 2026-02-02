@@ -12,8 +12,15 @@ export const Charts = {
    * @param {number[]} params.values
    * @param {number} params.height
    * @param {number} params.width
+   * @param {(value:number)=>string} params.valueFormatter
    */
-  barChartSVG({ labels = [], values = [], height = 180, width = 520 } = {}) {
+  barChartSVG({
+    labels = [],
+    values = [],
+    height = 180,
+    width = 520,
+    valueFormatter,
+  } = {}) {
     const n = Math.min(labels.length, values.length);
     if (!n) return `<div class="muted small">Sem dados para o gráfico.</div>`;
 
@@ -31,6 +38,10 @@ export const Charts = {
     const barW = Math.max(10, Math.floor((innerW - gap * (n - 1)) / n));
 
     const baseY = pad.top + innerH;
+    const format =
+      typeof valueFormatter === "function"
+        ? valueFormatter
+        : (v) => String(v ?? "");
 
     const bars = [];
     const xLabels = [];
@@ -45,6 +56,15 @@ export const Charts = {
       bars.push(
         `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="6" ry="6"
           fill="rgba(109,94,252,0.75)"></rect>`,
+      );
+
+      // valor no topo
+      const vy = Math.max(pad.top + 12, y - 6);
+      const vtxt = _escapeXml(format(v));
+      bars.push(
+        `<text x="${x + barW / 2}" y="${vy}" text-anchor="middle" font-size="10" fill="rgba(255,255,255,0.75)">
+          ${vtxt}
+        </text>`,
       );
 
       // label dia

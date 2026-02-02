@@ -43,6 +43,25 @@ export const Utils = {
     }).format(v);
   },
 
+  moneyMaskBRL(raw) {
+    const digits = String(raw || "").replace(/\D/g, "");
+    if (!digits) return "";
+    const cents = Number(digits) / 100;
+    return cents.toLocaleString("pt-BR", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  },
+
+  formatNumberBRL(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return "";
+    return n.toLocaleString("pt-BR", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  },
+
   uuid() {
     // simples e suficiente pro projeto (não criptográfico)
     return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {

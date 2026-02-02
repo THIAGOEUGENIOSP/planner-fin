@@ -16,6 +16,22 @@ function buildLocalState() {
     uiPrefs: {
       hiddenBudgetRows: {},
     },
+    consultorProfile: {
+      salary: 3100,
+      debtCreditCard: 7000,
+      debtOverdraft: 2000,
+      condoOverdue: 700,
+      condoUpcoming: 700,
+      condoUpcomingDue: "2026-02-15",
+    },
+    consultorPrefs: {
+      essentialCategoryIds: [],
+      debtPaymentTarget: 0,
+      useProfileOnDashboard: true,
+      useProfileOnTransactions: true,
+      easyGoalsStatus: {},
+      budgetSuggestionMode: "monthly",
+    },
   };
 }
 
@@ -66,6 +82,30 @@ export const State = {
     // Migração/garantia de campos locais
     if (!_local.uiPrefs) _local.uiPrefs = { hiddenBudgetRows: {} };
     if (!_local.uiPrefs.hiddenBudgetRows) _local.uiPrefs.hiddenBudgetRows = {};
+    if (!_local.consultorProfile) {
+      _local.consultorProfile = buildLocalState().consultorProfile;
+    }
+    if (!_local.consultorPrefs) {
+      _local.consultorPrefs = buildLocalState().consultorPrefs;
+    }
+    if (!_local.consultorPrefs.essentialCategoryIds) {
+      _local.consultorPrefs.essentialCategoryIds = [];
+    }
+    if (_local.consultorPrefs.debtPaymentTarget == null) {
+      _local.consultorPrefs.debtPaymentTarget = 0;
+    }
+    if (_local.consultorPrefs.useProfileOnDashboard == null) {
+      _local.consultorPrefs.useProfileOnDashboard = true;
+    }
+    if (_local.consultorPrefs.useProfileOnTransactions == null) {
+      _local.consultorPrefs.useProfileOnTransactions = true;
+    }
+    if (!_local.consultorPrefs.easyGoalsStatus) {
+      _local.consultorPrefs.easyGoalsStatus = {};
+    }
+    if (!_local.consultorPrefs.budgetSuggestionMode) {
+      _local.consultorPrefs.budgetSuggestionMode = "monthly";
+    }
 
     this.saveLocal();
     return _local;
@@ -79,6 +119,40 @@ export const State = {
   saveLocal() {
     if (!_local) return;
     localStorage.setItem(LOCAL_KEY, JSON.stringify(_local));
+  },
+
+  getConsultorProfile() {
+    const s = this.get();
+    if (!s.consultorProfile) {
+      s.consultorProfile = buildLocalState().consultorProfile;
+      this.saveLocal();
+    }
+    return { ...s.consultorProfile };
+  },
+
+  setConsultorProfile(patch) {
+    const s = this.get();
+    const base = s.consultorProfile || buildLocalState().consultorProfile;
+    s.consultorProfile = { ...base, ...(patch || {}) };
+    this.saveLocal();
+    return { ...s.consultorProfile };
+  },
+
+  getConsultorPrefs() {
+    const s = this.get();
+    if (!s.consultorPrefs) {
+      s.consultorPrefs = buildLocalState().consultorPrefs;
+      this.saveLocal();
+    }
+    return { ...s.consultorPrefs };
+  },
+
+  setConsultorPrefs(patch) {
+    const s = this.get();
+    const base = s.consultorPrefs || buildLocalState().consultorPrefs;
+    s.consultorPrefs = { ...base, ...(patch || {}) };
+    this.saveLocal();
+    return { ...s.consultorPrefs };
   },
 
   setMonthKey(monthKey) {
